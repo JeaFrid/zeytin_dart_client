@@ -40,6 +40,23 @@ class ZeytinClient {
     return _dioInstance;
   }
 
+Future<String?> _getHandshakeKey() async {
+    try {
+      Response response = await _dio.post("/token/handshake");
+      if (response.data["isSuccess"] == true) {
+        return response.data["tempKey"];
+      }
+    } catch (e) {
+      ZeytinPrint.errorPrint("Handshake failed: $e");
+    }
+    return null;
+  }
+
+  String _prepareSecurePayload(String key, String email, String password) {
+    final String plainData = "$email|$password";
+    return ZeytinTokener(key).encryptString(plainData);
+  }
+
   Future<void> init({
     required String host,
     required String email,
@@ -48,37 +65,35 @@ class ZeytinClient {
     _host = host;
     _email = email;
     _password = password;
-    _dio.options.baseUrl = _host;
+    _dio.options.baseUrl = host;
     var l = await _login(email: email, password: password);
     if (l.isSuccess) {
       _truckID = l.data?["id"] ?? "";
-      ZeytinPrint.successPrint(
-        "Hello developer! You are currently connected to the Zeytin server. Keep your code clean!",
-      );
-      ZeytinPrint.warningPrint("Host: $host");
-      ZeytinPrint.warningPrint("Email: $email");
-      ZeytinPrint.warningPrint("Truck: $truck");
-      Timer.periodic(Duration(seconds: 35), (timer) async {
+      ZeytinPrint.successPrint("Hello developer! Connected to Zeytin.");
+      Timer.periodic(const Duration(seconds: 35), (timer) async {
         await getToken();
       });
-    } else {
-      ZeytinPrint.warningPrint(
-        "Hello developer! I couldn't find a truck for the account you entered.",
-      );
-      ZeytinPrint.successPrint("A truck has set off for you...");
-      var c = await _createAccount(email: email, password: password);
-      if (c.isSuccess) {
-        ZeytinPrint.successPrint(
-          "Hello developer! You are currently connected to the Zeytin server. Keep your code clean!",
-        );
-        ZeytinPrint.warningPrint("Host: $host");
-        ZeytinPrint.warningPrint("Email: $email");
-        ZeytinPrint.warningPrint("Truck: $truck");
-        Timer.periodic(Duration(seconds: 50), (timer) async {
-          await getToken();
-        });
+    } else {   
+      if (l.message == "Account not found" ||
+          l.error?.contains("Account not found") == true) {
+        ZeytinPrint.warningPrint("Account not found. Creating a new truck...");
+        var c = await _createAccount(email: email, password: password);
+
+        if (c.isSuccess) {
+          await _login(email: email, password: password);
+          _truckID = c.data?["id"] ?? "";
+          ZeytinPrint.successPrint("New truck created and connected.");
+
+          Timer.periodic(const Duration(seconds: 35), (timer) async {
+            await getToken();
+          });
+        } else {
+          ZeytinPrint.errorPrint(
+            "Truck creation failed: ${c.error ?? c.message}",
+          );
+        }
       } else {
-        ZeytinPrint.errorPrint("There is a problem with the server.");
+        ZeytinPrint.errorPrint("Init Error: ${l.message} - ${l.error ?? ''}");
       }
     }
   }
@@ -88,18 +103,19 @@ class ZeytinClient {
     required String password,
   }) async {
     try {
+      String? tempKey = await _getHandshakeKey();
+      if (tempKey == null) throw Exception("Could not get handshake key");
+      String secureData = _prepareSecurePayload(tempKey, email, password);
       Response response = await _dio.post(
         "/truck/create",
-        data: {"email": email, "password": password},
+        data: {"data": secureData},
       );
-      var responseData = response.data is String
-          ? jsonDecode(response.data)
-          : response.data;
-      return ZeytinResponse.fromMap(responseData);
+
+      return ZeytinResponse.fromMap(response.data);
     } on DioException catch (e) {
       return ZeytinResponse(
         isSuccess: false,
-        message: "Opps...",
+        message: "Opss...",
         error: e.message,
       );
     }
@@ -110,15 +126,25 @@ class ZeytinClient {
     required String password,
   }) async {
     try {
+      String? tempKey = await _getHandshakeKey();
+      if (tempKey == null) {
+        return ZeytinResponse(
+          isSuccess: false,
+          message: "Handshake error",
+          error: "Connection refused",
+        );
+      }
+
+      String secureData = _prepareSecurePayload(tempKey, email, password);
       Response response = await _dio.post(
         "/truck/id",
-        data: {"email": email, "password": password},
+        data: {"data": secureData},
       );
-      var responseData = response.data is String
-          ? jsonDecode(response.data)
-          : response.data;
+
+      var responseData = response.data;
       ZeytinResponse zResponse = ZeytinResponse.fromMap(responseData);
-      if (zResponse.isSuccess && zResponse.data != null) {
+
+      if (zResponse.isSuccess) {
         _email = email;
         _password = password;
         await getToken();
@@ -127,10 +153,8 @@ class ZeytinClient {
     } on DioException catch (e) {
       return ZeytinResponse(
         isSuccess: false,
-        message: "Opps...",
-        error: e.response?.data != null && e.response?.data is Map
-            ? e.response?.data["error"]
-            : e.message,
+        message: "Login failed",
+        error: e.response?.data?["message"] ?? e.message,
       );
     }
   }
@@ -147,32 +171,25 @@ class ZeytinClient {
 
   Future<String?> getToken() async {
     try {
+      String? tempKey = await _getHandshakeKey();
+      if (tempKey == null) return null;
+
+      String secureData = _prepareSecurePayload(tempKey, _email, _password);
+
       Response response = await _dio.post(
         "/token/create",
-        data: {"email": _email, "password": _password},
+        data: {"data": secureData},
       );
-      var responseData = response.data is String
-          ? jsonDecode(response.data)
-          : response.data;
-      ZeytinResponse data = ZeytinResponse.fromMap(responseData);
-      if (data.isSuccess && data.data is Map && data.data!["token"] != null) {
+
+      ZeytinResponse data = ZeytinResponse.fromMap(response.data);
+      if (data.isSuccess && data.data?["token"] != null) {
         _token = data.data!["token"];
         return _token;
-      } else {
-        ZeytinPrint.errorPrint(
-          data.error ?? "There's an error message received by the client.",
-        );
-        return null;
       }
-    } on DioException catch (e, s) {
-      ZeytinPrint.errorPrint(
-        "There's an error message received by the client: ${e.message}",
-      );
-      ZeytinPrint.errorPrint(
-        "There's an error message received by the client: $s",
-      );
-      return null;
+    } catch (e) {
+      ZeytinPrint.errorPrint("Token renewal error: $e");
     }
+    return null;
   }
 
   Future<ZeytinResponse> existsBox({required String box}) async {
@@ -580,6 +597,7 @@ class ZeytinClient {
       );
     }
   }
+
   Stream<bool> watchLiveCall({required String roomName}) {
     String cleanHost = _host.trim();
     if (cleanHost.endsWith('/')) {
