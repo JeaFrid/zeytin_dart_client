@@ -60,7 +60,335 @@ class ZeytinCommunity {
       );
     }
   }
-Future<ZeytinResponse> editCommunity({
+
+  Future<ZeytinResponse> deleteCommunityAndContents({
+    required String communityId,
+    required ZeytinUserModel admin,
+  }) async {
+    try {
+      final comData = await zeytin.getData(
+        box: "communities",
+        tag: communityId,
+      );
+
+      if (comData.data == null) {
+        return ZeytinResponse(isSuccess: false, message: "Community not found");
+      }
+
+      final community = ZeytinCommunityModel.fromJson(comData.data!);
+
+      if (!community.admins.any((a) => a.uid == admin.uid)) {
+        return ZeytinResponse(isSuccess: false, message: "Not authorized");
+      }
+
+      final msgFilter = await zeytin.filter(
+        box: "messages",
+        field: "chatId",
+        value: communityId,
+      );
+
+      if (msgFilter.isSuccess && msgFilter.data is Map) {
+        var rawList = msgFilter.data!["results"];
+        if (rawList is List) {
+          for (var item in rawList) {
+            final msg = ZeytinMessage.fromJson(item);
+            await zeytin.deleteData(box: "messages", tag: msg.messageId);
+          }
+        }
+      }
+
+      final rooms = await getCommunityRooms(communityId: communityId);
+      for (var room in rooms) {
+        await zeytin.deleteData(box: "community_rooms", tag: room.id);
+      }
+
+      final posts = await getBoardPosts(communityId: communityId);
+      for (var post in posts) {
+        await zeytin.deleteData(box: "community_boards", tag: post.id);
+      }
+
+      for (var user in community.participants) {
+        var userComsRes = await zeytin.getData(
+          box: "my_communities",
+          tag: user.uid,
+        );
+        if (userComsRes.isSuccess && userComsRes.data != null) {
+          List<String> currentIds = List<String>.from(
+            userComsRes.data!["communityIds"] ?? [],
+          );
+          if (currentIds.contains(communityId)) {
+            currentIds.remove(communityId);
+            await zeytin.addData(
+              box: "my_communities",
+              tag: user.uid,
+              value: {"communityIds": currentIds},
+            );
+          }
+        }
+      }
+
+      return await zeytin.deleteData(box: "communities", tag: communityId);
+    } catch (e) {
+      return ZeytinResponse(isSuccess: false, message: e.toString());
+    }
+  }
+
+  Future<ZeytinResponse> createInviteCode({
+    required String communityId,
+    required ZeytinUserModel admin,
+    String? customCode,
+    Duration? duration,
+    int? maxUses,
+    Map<String, dynamic>? moreData,
+  }) async {
+    try {
+      final comData = await zeytin.getData(
+        box: "communities",
+        tag: communityId,
+      );
+
+      if (comData.data == null) {
+        return ZeytinResponse(isSuccess: false, message: "Community not found");
+      }
+
+      final community = ZeytinCommunityModel.fromJson(comData.data!);
+      if (!community.admins.any((a) => a.uid == admin.uid)) {
+        return ZeytinResponse(isSuccess: false, message: "Not authorized");
+      }
+
+      final String code = customCode ?? const Uuid().v4().substring(0, 8);
+      final DateTime now = DateTime.now();
+      final DateTime? expiresAt = duration != null ? now.add(duration) : null;
+
+      final invite = ZeytinCommunityInviteModel(
+        code: code,
+        communityId: communityId,
+        creatorId: admin.uid,
+        createdAt: now,
+        expiresAt: expiresAt,
+        maxUses: maxUses,
+        usedCount: 0,
+        moreData: moreData ?? {},
+      );
+
+      return await zeytin.addData(
+        box: "community_invites",
+        tag: code,
+        value: invite.toJson(),
+      );
+    } catch (e) {
+      return ZeytinResponse(isSuccess: false, message: e.toString());
+    }
+  }
+
+  Future<List<ZeytinCommunityInviteModel>> getInviteCodes({
+    required String communityId,
+  }) async {
+    try {
+      final filterRes = await zeytin.filter(
+        box: "community_invites",
+        field: "communityId",
+        value: communityId,
+      );
+
+      if (!filterRes.isSuccess || filterRes.data == null) return [];
+
+      List<ZeytinCommunityInviteModel> invites = [];
+      if (filterRes.data is Map) {
+        var rawList = filterRes.data!["results"];
+        if (rawList is List) {
+          for (var item in rawList) {
+            invites.add(ZeytinCommunityInviteModel.fromJson(item));
+          }
+        }
+      }
+      return invites;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<ZeytinResponse> validateInviteCode({required String code}) async {
+    try {
+      final res = await zeytin.getData(box: "community_invites", tag: code);
+
+      if (res.data == null) {
+        return ZeytinResponse(isSuccess: false, message: "Invalid code");
+      }
+
+      final invite = ZeytinCommunityInviteModel.fromJson(res.data!);
+
+      if (invite.isExpired) {
+        return ZeytinResponse(isSuccess: false, message: "Code expired");
+      }
+
+      if (invite.isQuotaExceeded) {
+        return ZeytinResponse(isSuccess: false, message: "Quota exceeded");
+      }
+
+      return ZeytinResponse(
+        isSuccess: true,
+        message: "Valid",
+        data: invite.toJson(),
+      );
+    } catch (e) {
+      return ZeytinResponse(isSuccess: false, message: e.toString());
+    }
+  }
+
+  Future<ZeytinCommunityInviteModel?> getInvite({required String code}) async {
+    try {
+      final res = await zeytin.getData(box: "community_invites", tag: code);
+
+      if (res.data == null) {
+        return null;
+      }
+
+      return ZeytinCommunityInviteModel.fromJson(res.data!);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<ZeytinResponse> useInviteCode({required String code}) async {
+    try {
+      final res = await zeytin.getData(box: "community_invites", tag: code);
+
+      if (res.data == null) {
+        return ZeytinResponse(isSuccess: false, message: "Code not found");
+      }
+
+      var invite = ZeytinCommunityInviteModel.fromJson(res.data!);
+
+      if (!invite.isValid) {
+        return ZeytinResponse(
+          isSuccess: false,
+          message: "Code is not valid anymore",
+        );
+      }
+
+      invite = invite.copyWith(usedCount: invite.usedCount + 1);
+
+      return await zeytin.addData(
+        box: "community_invites",
+        tag: code,
+        value: invite.toJson(),
+      );
+    } catch (e) {
+      return ZeytinResponse(isSuccess: false, message: e.toString());
+    }
+  }
+
+  Future<ZeytinResponse> deleteInviteCode({
+    required String code,
+    required String communityId,
+    required ZeytinUserModel admin,
+  }) async {
+    try {
+      final comData = await zeytin.getData(
+        box: "communities",
+        tag: communityId,
+      );
+
+      if (comData.data == null) {
+        return ZeytinResponse(isSuccess: false, message: "Community not found");
+      }
+
+      final community = ZeytinCommunityModel.fromJson(comData.data!);
+      if (!community.admins.any((a) => a.uid == admin.uid)) {
+        return ZeytinResponse(isSuccess: false, message: "Not authorized");
+      }
+
+      return await zeytin.deleteData(box: "community_invites", tag: code);
+    } catch (e) {
+      return ZeytinResponse(isSuccess: false, message: e.toString());
+    }
+  }
+
+  Future<ZeytinResponse> createRoom({
+    required String communityId,
+    required ZeytinUserModel admin,
+    required String roomName,
+    ZeytinRoomType type = ZeytinRoomType.text,
+  }) async {
+    try {
+      final comData = await zeytin.getData(
+        box: "communities",
+        tag: communityId,
+      );
+      if (comData.data == null) {
+        return ZeytinResponse(isSuccess: false, message: "Community not found");
+      }
+
+      final community = ZeytinCommunityModel.fromJson(comData.data!);
+      if (!community.admins.any((a) => a.uid == admin.uid)) {
+        return ZeytinResponse(
+          isSuccess: false,
+          message: "Only admins can create rooms",
+        );
+      }
+
+      final roomId = const Uuid().v4();
+
+      final newRoom = ZeytinCommunityRoomModel(
+        id: roomId,
+        communityId: communityId,
+        name: roomName,
+        type: type,
+        createdAt: DateTime.now(),
+      );
+      return await zeytin.addData(
+        box: "community_rooms",
+        tag: roomId,
+        value: newRoom.toJson(),
+      );
+    } catch (e) {
+      return ZeytinResponse(isSuccess: false, message: e.toString());
+    }
+  }
+
+  Future<ZeytinCommunityRoomModel?> getRoom({required String roomId}) async {
+    try {
+      final roomData = await zeytin.getData(
+        box: "community_rooms",
+        tag: roomId,
+      );
+      if (roomData.data == null) return null;
+      return ZeytinCommunityRoomModel.fromJson(roomData.data!);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<List<ZeytinCommunityRoomModel>> getCommunityRooms({
+    required String communityId,
+  }) async {
+    try {
+      final filterRes = await zeytin.filter(
+        box: "community_rooms",
+        field: "communityId",
+        value: communityId,
+      );
+
+      if (!filterRes.isSuccess || filterRes.data == null) return [];
+
+      List<ZeytinCommunityRoomModel> rooms = [];
+      if (filterRes.data is Map) {
+        var rawList = filterRes.data!["results"];
+        if (rawList is List) {
+          for (var item in rawList) {
+            rooms.add(ZeytinCommunityRoomModel.fromJson(item));
+          }
+        }
+      }
+      rooms.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      return rooms;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<ZeytinResponse> editCommunity({
     required String communityId,
     required ZeytinUserModel admin,
     required ZeytinCommunityModel updatedCommunity,
@@ -97,6 +425,7 @@ Future<ZeytinResponse> editCommunity({
       return ZeytinResponse(isSuccess: false, message: e.toString());
     }
   }
+
   Future<List<ZeytinCommunityModel>> getAllCommunities() async {
     try {
       final res = await zeytin.getBox(box: "communities");

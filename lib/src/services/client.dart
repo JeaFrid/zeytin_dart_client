@@ -40,11 +40,14 @@ class ZeytinClient {
     return _dioInstance;
   }
 
-Future<String?> _getHandshakeKey() async {
+  Future<String?> _getHandshakeKey() async {
     try {
       Response response = await _dio.post("/token/handshake");
       if (response.data["isSuccess"] == true) {
         return response.data["tempKey"];
+      } else {
+        ZeytinPrint.errorPrint(response.statusCode.toString());
+        ZeytinPrint.errorPrint(response.data.toString());
       }
     } catch (e) {
       ZeytinPrint.errorPrint("Handshake failed: $e");
@@ -73,11 +76,11 @@ Future<String?> _getHandshakeKey() async {
       Timer.periodic(const Duration(seconds: 35), (timer) async {
         await getToken();
       });
-    } else {   
+    } else {
       if (l.message == "Account not found" ||
           l.error?.contains("Account not found") == true) {
         ZeytinPrint.warningPrint("Account not found. Creating a new truck...");
-        var c = await _createAccount(email: email, password: password);
+        var c = await createAccount(email: email, password: password);
 
         if (c.isSuccess) {
           await _login(email: email, password: password);
@@ -98,7 +101,7 @@ Future<String?> _getHandshakeKey() async {
     }
   }
 
-  Future<ZeytinResponse> _createAccount({
+  Future<ZeytinResponse> createAccount({
     required String email,
     required String password,
   }) async {
@@ -479,12 +482,25 @@ Future<String?> _getHandshakeKey() async {
     }
   }
 
-  Future<ZeytinResponse> uploadFile(String filePath, String fileName) async {
+  Future<ZeytinResponse> uploadFile(
+    String filePath,
+    String fileName, {
+    List<int>? bytes,
+  }) async {
     try {
-      var formData = FormData.fromMap({
-        "token": _token,
-        "file": await MultipartFile.fromFile(filePath, filename: fileName),
-      });
+      MultipartFile multipartFile;
+
+      if (bytes != null) {
+        multipartFile = MultipartFile.fromBytes(bytes, filename: fileName);
+      } else {
+        multipartFile = await MultipartFile.fromFile(
+          filePath,
+          filename: fileName,
+        );
+      }
+
+      var formData = FormData.fromMap({"token": _token, "file": multipartFile});
+
       Response response = await _dio.post("/storage/upload", data: formData);
       var responseData = response.data is String
           ? jsonDecode(response.data)
@@ -521,29 +537,70 @@ Future<String?> _getHandshakeKey() async {
     }
   }
 
-  Stream<Map<String, dynamic>> watchBox({required String box}) {
-    String cleanHost = _host.trim();
-    if (cleanHost.endsWith('/')) {
-      cleanHost = cleanHost.substring(0, cleanHost.length - 1);
+  Stream<Map<String, dynamic>> watchBox({required String box}) async* {
+    final ZeytinTokener tokener = ZeytinTokener(_password);
+    int retryCount = 0;
+    const int maxDelaySeconds = 60;
+
+    while (true) {
+      final String cleanHost = _host.trim().endsWith('/')
+          ? _host.trim().substring(0, _host.trim().length - 1)
+          : _host.trim();
+      final String protocol = cleanHost.startsWith("https") ? "wss" : "ws";
+      final String domain = cleanHost.replaceFirst(RegExp(r'https?://'), "");
+      final String wsUrl = "$protocol://$domain/data/watch/$_token/$box";
+
+      WebSocketChannel? channel;
+      try {
+        if (_token.isEmpty) {
+          ZeytinPrint.errorPrint("Token is empty, stopping watchBox.");
+          break;
+        }
+
+        ZeytinPrint.warningPrint(
+          "Connecting to WebSocket: $wsUrl (Attempt: ${retryCount + 1})",
+        );
+        channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+
+        await for (final message in channel.stream) {
+          retryCount = 0;
+
+          try {
+            final decoded = jsonDecode(message);
+            if (decoded is Map &&
+                decoded.containsKey('error') &&
+                (decoded['error'].toString().contains("Unauthorized") ||
+                    decoded['error'].toString().contains("Invalid token"))) {
+              ZeytinPrint.errorPrint(
+                "Critical Auth Error in Stream: ${decoded['error']}",
+              );
+              channel.sink.close();
+              return;
+            }
+
+            if (decoded["data"] != null) {
+              decoded["data"] = tokener.decryptMap(decoded["data"]);
+            }
+            if (decoded["entries"] != null) {
+              decoded["entries"] = tokener.decryptMap(decoded["entries"]);
+            }
+            yield decoded as Map<String, dynamic>;
+          } catch (e) {
+            ZeytinPrint.errorPrint("Data parse error: $e");
+          }
+        }
+        ZeytinPrint.warningPrint("WebSocket closed by server.");
+      } catch (e) {
+        ZeytinPrint.errorPrint("WebSocket connection error: $e.");
+      } finally {
+        await channel?.sink.close();
+      }
+      retryCount++;
+      int delaySeconds = (retryCount * 3).clamp(3, maxDelaySeconds);
+
+      ZeytinPrint.warningPrint("Reconnecting in $delaySeconds seconds...");
+      await Future.delayed(Duration(seconds: delaySeconds));
     }
-    String protocol = cleanHost.startsWith("https") ? "wss" : "ws";
-    String domain = cleanHost.replaceFirst(RegExp(r'https?://'), "");
-    var wsUrl = "$protocol://$domain/data/watch/$_token/$box";
-    ZeytinPrint.warningPrint("Connecting to WebSocket: $wsUrl");
-
-    var channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-    var tokener = ZeytinTokener(_password);
-
-    return channel.stream.map((message) {
-      var decoded = jsonDecode(message);
-      if (decoded["data"] != null) {
-        decoded["data"] = tokener.decryptMap(decoded["data"]);
-      }
-      if (decoded["entries"] != null) {
-        decoded["entries"] = tokener.decryptMap(decoded["entries"]);
-      }
-      return decoded as Map<String, dynamic>;
-    });
   }
 
   Future<ZeytinResponse> joinLiveCall({
@@ -598,32 +655,48 @@ Future<String?> _getHandshakeKey() async {
     }
   }
 
-  Stream<bool> watchLiveCall({required String roomName}) {
+  Stream<bool> watchLiveCall({required String roomName}) async* {
     String cleanHost = _host.trim();
     if (cleanHost.endsWith('/')) {
       cleanHost = cleanHost.substring(0, cleanHost.length - 1);
     }
     String protocol = cleanHost.startsWith("https") ? "wss" : "ws";
     String domain = cleanHost.replaceFirst(RegExp(r'https?://'), "");
-
     var tokener = ZeytinTokener(_password);
     var encryptedData = tokener.encryptMap({"roomName": roomName});
     var encodedData = Uri.encodeComponent(encryptedData);
-    var wsUrl = "$protocol://$domain/call/stream/$_token?data=$encodedData";
 
-    var channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+    int retryCount = 0;
+    while (true) {
+      var wsUrl = "$protocol://$domain/call/stream/$_token?data=$encodedData";
 
-    return channel.stream.map((message) {
+      WebSocketChannel? channel;
       try {
-        var decoded = jsonDecode(message);
-        if (decoded is Map && decoded.containsKey("isActive")) {
-          return decoded["isActive"] as bool;
+        if (_token.isEmpty) break;
+        channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+        await for (var message in channel.stream) {
+          retryCount = 0;
+          try {
+            var decoded = jsonDecode(message);
+            if (decoded is Map && decoded.containsKey("isActive")) {
+              yield decoded["isActive"] as bool;
+            } else {
+              yield false;
+            }
+          } catch (e) {
+            yield false;
+          }
         }
-        return false;
+        ZeytinPrint.warningPrint("LiveCall Stream closed.");
       } catch (e) {
-        return false;
+        ZeytinPrint.errorPrint("Live call socket error: $e");
+      } finally {
+        await channel?.sink.close();
       }
-    });
+      retryCount++;
+      int delaySeconds = (retryCount * 3).clamp(3, 60);
+      await Future.delayed(Duration(seconds: delaySeconds));
+    }
   }
 
   Future<ZeytinResponse> checkLiveCall({required String roomName}) async {

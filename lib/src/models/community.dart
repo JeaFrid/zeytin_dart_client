@@ -1,10 +1,177 @@
 import 'package:zeytin/src/models/user.dart';
 
+enum ZeytinCommunityModelType {
+  private("private"),
+  privCommunity("privCommunity"),
+  superCommunity("superCommunity"),
+  channel("channel"),
+  voiceChat("voiceChat"),
+  muteChat("muteChat"),
+  community("community");
+
+  final String value;
+  const ZeytinCommunityModelType(this.value);
+}
+
+ZeytinCommunityModelType? _typeFromString(String? value) {
+  if (value == null) return null;
+  return ZeytinCommunityModelType.values.firstWhere(
+    (e) => e.value == value,
+    orElse: () => ZeytinCommunityModelType.private,
+  );
+}
+
+enum ZeytinRoomType {
+  text("text"),
+  voice("voice"),
+  announcement("announcement");
+
+  final String value;
+  const ZeytinRoomType(this.value);
+}
+
+class ZeytinCommunityRoomModel {
+  final String id;
+  final String communityId;
+  final String name;
+  final ZeytinRoomType type;
+  final List<String> allowedRoles;
+  final DateTime createdAt;
+
+  ZeytinCommunityRoomModel({
+    required this.id,
+    required this.communityId,
+    required this.name,
+    this.type = ZeytinRoomType.text,
+    this.allowedRoles = const [],
+    required this.createdAt,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'communityId': communityId,
+      'name': name,
+      'type': type.value,
+      'allowedRoles': allowedRoles,
+      'createdAt': createdAt.toIso8601String(),
+    };
+  }
+
+  factory ZeytinCommunityRoomModel.fromJson(Map<String, dynamic> json) {
+    return ZeytinCommunityRoomModel(
+      id: json['id'] ?? '',
+      communityId: json['communityId'] ?? '',
+      name: json['name'] ?? '',
+      type: ZeytinRoomType.values.firstWhere(
+        (e) => e.value == json['type'],
+        orElse: () => ZeytinRoomType.text,
+      ),
+      allowedRoles: List<String>.from(json['allowedRoles'] ?? []),
+      createdAt: DateTime.parse(json['createdAt']),
+    );
+  }
+}
+
+class ZeytinCommunityInviteModel {
+  final String code;
+  final String communityId;
+  final String creatorId;
+  final DateTime createdAt;
+  final DateTime? expiresAt;
+  final int? maxUses;
+  final int usedCount;
+  final Map<String, dynamic> moreData;
+
+  ZeytinCommunityInviteModel({
+    required this.code,
+    required this.communityId,
+    required this.creatorId,
+    required this.createdAt,
+    this.expiresAt,
+    this.maxUses,
+    this.usedCount = 0,
+    this.moreData = const {},
+  });
+
+  factory ZeytinCommunityInviteModel.empty() {
+    return ZeytinCommunityInviteModel(
+      code: '',
+      communityId: '',
+      creatorId: '',
+      createdAt: DateTime.now(),
+    );
+  }
+
+  bool get isExpired {
+    if (expiresAt == null) return false;
+    return DateTime.now().isAfter(expiresAt!);
+  }
+
+  bool get isQuotaExceeded {
+    if (maxUses == null) return false;
+    return usedCount >= maxUses!;
+  }
+
+  bool get isValid => !isExpired && !isQuotaExceeded;
+
+  Map<String, dynamic> toJson() {
+    return {
+      "code": code,
+      "communityId": communityId,
+      "creatorId": creatorId,
+      "createdAt": createdAt.toIso8601String(),
+      "expiresAt": expiresAt?.toIso8601String(),
+      "maxUses": maxUses,
+      "usedCount": usedCount,
+      "moreData": moreData,
+    };
+  }
+
+  factory ZeytinCommunityInviteModel.fromJson(Map<String, dynamic> json) {
+    return ZeytinCommunityInviteModel(
+      code: json["code"] ?? "",
+      communityId: json["communityId"] ?? "",
+      creatorId: json["creatorId"] ?? "",
+      createdAt: DateTime.tryParse(json["createdAt"] ?? "") ?? DateTime.now(),
+      expiresAt: json["expiresAt"] != null
+          ? DateTime.tryParse(json["expiresAt"])
+          : null,
+      maxUses: json["maxUses"],
+      usedCount: json["usedCount"] ?? 0,
+      moreData: json["moreData"] ?? {},
+    );
+  }
+
+  ZeytinCommunityInviteModel copyWith({
+    String? code,
+    String? communityId,
+    String? creatorId,
+    DateTime? createdAt,
+    DateTime? expiresAt,
+    int? maxUses,
+    int? usedCount,
+    Map<String, dynamic>? moreData,
+  }) {
+    return ZeytinCommunityInviteModel(
+      code: code ?? this.code,
+      communityId: communityId ?? this.communityId,
+      creatorId: creatorId ?? this.creatorId,
+      createdAt: createdAt ?? this.createdAt,
+      expiresAt: expiresAt ?? this.expiresAt,
+      maxUses: maxUses ?? this.maxUses,
+      usedCount: usedCount ?? this.usedCount,
+      moreData: moreData ?? this.moreData,
+    );
+  }
+}
+
 class ZeytinCommunityModel {
   final String id;
   final String name;
   final String? description;
   final String? photoURL;
+  final ZeytinCommunityModelType? type;
   final DateTime createdAt;
   final List<ZeytinUserModel> participants;
   final List<ZeytinUserModel> admins;
@@ -25,6 +192,7 @@ class ZeytinCommunityModel {
     required this.id,
     required this.name,
     this.description,
+    this.type,
     this.photoURL,
     required this.createdAt,
     required this.participants,
@@ -48,6 +216,7 @@ class ZeytinCommunityModel {
       id: '',
       name: '',
       description: null,
+      type: null,
       photoURL: null,
       createdAt: DateTime.now(),
       participants: [],
@@ -73,6 +242,7 @@ class ZeytinCommunityModel {
       'name': name,
       'description': description,
       'photoURL': photoURL,
+      'type': type?.value,
       'createdAt': createdAt.toIso8601String(),
       'participants': participants.map((x) => x.toJson()).toList(),
       'admins': admins.map((x) => x.toJson()).toList(),
@@ -95,6 +265,7 @@ class ZeytinCommunityModel {
     return ZeytinCommunityModel(
       id: json['id'] ?? '',
       name: json['name'] ?? '',
+      type: _typeFromString(json['type'] as String?),
       description: json['description'],
       photoURL: json['photoURL'],
       createdAt: DateTime.parse(json['createdAt']),
@@ -131,6 +302,7 @@ class ZeytinCommunityModel {
     String? id,
     String? name,
     String? description,
+    ZeytinCommunityModelType? type,
     String? photoURL,
     DateTime? createdAt,
     List<ZeytinUserModel>? participants,
@@ -151,6 +323,7 @@ class ZeytinCommunityModel {
     return ZeytinCommunityModel(
       id: id ?? this.id,
       name: name ?? this.name,
+      type: type ?? this.type,
       description: description ?? this.description,
       photoURL: photoURL ?? this.photoURL,
       createdAt: createdAt ?? this.createdAt,
