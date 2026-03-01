@@ -32,7 +32,7 @@ class ZeytinStore {
       value: storeModel.copyWith(id: id).toJson(),
     );
   }
-
+ 
   Future<ZeytinStoreModel> getStore({required String id}) async {
     var res = await zeytin.getData(box: "stores", tag: id);
     return ZeytinStoreModel.fromJson(res.data ?? {});

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:uuid/uuid.dart';
 import 'package:zeytin/zeytin.dart';
 
@@ -5,7 +7,6 @@ class ZeytinChat {
   final ZeytinClient zeytin;
 
   ZeytinChat(this.zeytin);
-
   Future<ZeytinResponse> createChat({
     required String chatName,
     required List<ZeytinUserModel> participants,
@@ -16,9 +17,23 @@ class ZeytinChat {
     String? moreData,
   }) async {
     try {
-      final chatId = const Uuid().v4();
-      final now = DateTime.now();
+      String chatId;
+      if (type == ZeytinChatType.private && participants.length == 2) {
+        List<String> uids = participants.map((u) => u.uid).toList();
+        chatId = "private_${uids[0]}_${uids[1]}";
+        final existing = await getChat(chatId: chatId);
+        if (existing != null) {
+          return ZeytinResponse(
+            isSuccess: true,
+            message: "Chat already exists",
+            data: existing.toJson(),
+          );
+        }
+      } else {
+        chatId = const Uuid().v4();
+      }
 
+      final now = DateTime.now();
       final newChat = ZeytinChatModel.empty().copyWith(
         chatID: chatId,
         type: type,
@@ -30,7 +45,6 @@ class ZeytinChat {
         admins: admins ?? (type == ZeytinChatType.private ? [] : participants),
         moreData: moreData,
       );
-
       final response = await zeytin.addData(
         box: "chats",
         tag: chatId,
@@ -47,7 +61,23 @@ class ZeytinChat {
       }
       return response;
     } catch (e) {
-      return ZeytinResponse(isSuccess: false, message: e.toString());
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Error in createChat",
+        error: e.toString(),
+      );
+    }
+  }
+
+  String getChatId({
+    required List<ZeytinUserModel> participants,
+    required ZeytinChatType type,
+  }) {
+    if (type == ZeytinChatType.private && participants.length == 2) {
+      List<String> uids = participants.map((u) => u.uid).toList()..sort();
+      return "private_${uids[0]}_${uids[1]}";
+    } else {
+      return const Uuid().v4();
     }
   }
 
@@ -71,6 +101,44 @@ class ZeytinChat {
           value: {"chatIds": currentChatIds},
         );
       }
+    }
+  }
+
+  Future<ZeytinResponse> deleteChatAndAllMessage({
+    required String chatId,
+  }) async {
+    try {
+      final chatData = await zeytin.getData(box: "chats", tag: chatId);
+      if (chatData.data == null) {
+        return ZeytinResponse(isSuccess: false, message: "Chat not found");
+      }
+      final chat = ZeytinChatModel.fromJson(chatData.data!);
+      final messages = await getMessages(chatId: chatId, limit: 5000);
+      for (var m in messages) {
+        await zeytin.deleteData(box: "messages", tag: m.messageId);
+      }
+      for (var user in chat.participants) {
+        var userChatsRes = await zeytin.getData(box: "my_chats", tag: user.uid);
+        if (userChatsRes.isSuccess && userChatsRes.data != null) {
+          List<String> currentChatIds = List<String>.from(
+            userChatsRes.data!["chatIds"] ?? [],
+          );
+          currentChatIds.remove(chatId);
+          await zeytin.addData(
+            box: "my_chats",
+            tag: user.uid,
+            value: {"chatIds": currentChatIds},
+          );
+        }
+      }
+      final response = await zeytin.deleteData(box: "chats", tag: chatId);
+
+      return response;
+    } catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Error terminating chat: $e",
+      );
     }
   }
 
@@ -357,6 +425,11 @@ class ZeytinChat {
 
       if (response.isSuccess) {
         await _updateChatLastMessage(chatId, message, sender);
+        final chatData = await zeytin.getData(box: "chats", tag: chatId);
+        if (chatData.isSuccess && chatData.data != null) {
+          final chat = ZeytinChatModel.fromJson(chatData.data!);
+          await _indexChatForParticipants(chatId, chat.participants);
+        }
       }
 
       return response;
@@ -365,42 +438,96 @@ class ZeytinChat {
     }
   }
 
+  StreamSubscription listenChats({
+    required ZeytinUserModel user,
+    required Function(ZeytinChatModel chat) onChatCreated,
+    required Function(ZeytinChatModel chat) onChatUpdated,
+    required Function(String chatId) onChatDeleted,
+  }) {
+    return zeytin.watchBox(box: "chats").listen((event) {
+      final op = event["op"];
+      final tag = event["tag"];
+      final rawData = event["data"];
+
+      if (op == "DELETE") {
+        onChatDeleted(tag.toString());
+        return;
+      }
+
+      if (rawData != null) {
+        final chat = ZeytinChatModel.fromJson(rawData);
+        if (chat.participants.any((p) => p.uid == user.uid)) {
+          if (op == "PUT") {
+            onChatCreated(chat);
+          } else if (op == "UPDATE") {
+            onChatUpdated(chat);
+          }
+        }
+      }
+    });
+  }
+
+  StreamSubscription<Map<String, dynamic>> listen({
+    required String chatId,
+    required Function(ZeytinMessage message) onMessageReceived,
+    required Function(ZeytinMessage message) onMessageUpdated,
+    required Function(String messageId) onMessageDeleted,
+  }) {
+    return zeytin.watchBox(box: "messages").listen((event) {
+      final op = event["op"];
+      final tag = event["tag"];
+
+      if (op == "DELETE") {
+        onMessageDeleted(tag.toString());
+        return;
+      }
+
+      final rawData = event["data"];
+      if (rawData == null) return;
+
+      try {
+        final message = ZeytinMessage.fromJson(rawData);
+        if (message.chatId.trim() == chatId.trim()) {
+          if (message.isDeleted) {
+            onMessageDeleted(message.messageId);
+          } else if (op == "PUT") {
+            onMessageReceived(message);
+          } else if (op == "UPDATE") {
+            onMessageUpdated(message);
+          }
+        }
+      } catch (e) {
+        ZeytinPrint.errorPrint("WS ERROR: $e");
+      }
+    });
+  }
+
   Future<List<ZeytinMessage>> getMessages({
     required String chatId,
     int? limit,
     int? offset,
   }) async {
     try {
-      final filterRes = await zeytin.filter(
-        box: "messages",
-        field: "chatId",
-        value: chatId,
-      );
-
-      if (!filterRes.isSuccess || filterRes.data == null) return [];
+      final res = await zeytin.getBox(box: "messages");
+      if (!res.isSuccess || res.data == null) return [];
 
       List<ZeytinMessage> messages = [];
-      if (filterRes.data is Map) {
-        Map<String, dynamic> rawData = filterRes.data!;
-        if (rawData.containsKey("data") && rawData["data"] is Map) {
-          var items = rawData["data"] as Map;
-          for (var item in items.values) {
-            messages.add(ZeytinMessage.fromJson(item));
-          }
+      for (var item in res.data!.values) {
+        final message = ZeytinMessage.fromJson(item);
+        if (message.chatId == chatId) {
+          messages.add(message);
         }
       }
-
       messages.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-
       final startIndex = offset ?? 0;
       final endIndex = limit != null
           ? (startIndex + limit).clamp(0, messages.length)
           : messages.length;
 
       if (startIndex >= messages.length) return [];
-
       return messages.sublist(startIndex, endIndex).reversed.toList();
     } catch (e) {
+      ZeytinPrint.errorPrint("getMessages logic error: $e");
       return [];
     }
   }
@@ -989,9 +1116,7 @@ class ZeytinChat {
       );
 
       await zeytin.addData(box: "chats", tag: chatId, value: chat.toJson());
-    } catch (e) {
-      rethrow;
-    }
+    } catch (e) {}
   }
 
   String _getSystemMessageText(

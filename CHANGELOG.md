@@ -6,3 +6,7 @@
 
 * Major changes on the server side: The token acquisition mechanism has been completely changed; email and password no longer circulate within the payload.
 * Changes in system infrastructure.
+
+## 2.2.0
+
+- Cleaning and updates.

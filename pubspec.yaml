@@ -1,6 +1,6 @@
 name: zeytin
 description: A server solution that is independent of external dependencies, has its own database engine, is end-to-end encrypted, and is autonomous.
-version: 2.1.0
+version: 2.2.0
 homepage: https://github.com/JeaFrid/zeytin_dart_client
 
 environment:

@@ -1,6 +1,6 @@
 library;
 
-export 'src/models/chat.dart';
+export 'src/services/chat.dart';
 export 'src/models/message.dart';
 export 'src/models/response.dart';
 export 'src/models/social.dart';
