@@ -1,3 +1,4 @@
+import 'package:livekit_client/livekit_client.dart';
 import 'package:zeytin/src/models/user.dart';
 
 enum ZeytinCallStatus {
@@ -36,4 +37,21 @@ class ZeytinCallParticipant {
     required this.isLocal,
     this.rawParticipant,
   });
+  VideoTrack? get cameraTrack {
+    for (var pub in rawParticipant.videoTrackPublications) {
+      if (pub.source == TrackSource.camera && pub.track != null) {
+        return pub.track as VideoTrack;
+      }
+    }
+    return null;
+  }
+
+  VideoTrack? get screenShareTrack {
+    for (var pub in rawParticipant.videoTrackPublications) {
+      if (pub.source == TrackSource.screenShareVideo && pub.track != null) {
+        return pub.track as VideoTrack;
+      }
+    }
+    return null;
+  }
 }

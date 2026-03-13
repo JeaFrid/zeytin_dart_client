@@ -19,7 +19,6 @@ When you start developing with this package, you gain the following advantages o
 
 # 2. Installation and Getting Started
 
-
 Please prepare the server first, or try an existing one: [Zeytin Official Github](https://github.com/JeaFrid/Zeytin)
 
 Including the Zeytin package in your project consists of more than just adding a line of code. Since the LiveKit-based audio and video calling modules included in the package require hardware access, your application must request the necessary permissions from the operating system.
@@ -1156,4 +1155,37 @@ If a notification has lost its validity or was deleted by the user, you can comp
 await notificationService.deleteNotification(
   notificationId: "notification_id"
 );
+```
+
+# 14. Email Service
+
+Zeytin allows you to send emails directly from the server to your users or specified addresses without needing to install any external SMTP packages. All email content and recipient information are securely transmitted to the server with AES encryption through the `ZeytinMail` service.
+
+> **Note:** For this service to work, you must have entered your valid SMTP settings in the `config.dart` file on your Zeytin server.
+
+### Sending an Email
+
+You can initialize the mail service via your Zeytin client (`zeytin`) and send emails in HTML format.
+
+```dart
+import 'package:zeytin/zeytin.dart';
+
+final mailService = ZeytinMail(zeytin);
+
+final response = await mailService.sendEmail(
+  to: "user@example.com",
+  subject: "Welcome to Our System!",
+  htmlContent: """
+    <div style='font-family: Arial; padding: 20px;'>
+      <h2 style='color: #d97706;'>Hello John!</h2>
+      <p>Welcome to our application built with Zeytin infrastructure.</p>
+    </div>
+  """,
+);
+
+if (response.isSuccess) {
+  print("Email sent successfully!");
+} else {
+  print("Sending error: \${response.error}");
+}
 ```

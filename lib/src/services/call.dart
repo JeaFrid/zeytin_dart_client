@@ -161,6 +161,9 @@ class ZeytinCall {
       ..on<TrackUnmutedEvent>((e) => _emitParticipants())
       ..on<LocalTrackPublishedEvent>((e) => _emitParticipants())
       ..on<LocalTrackUnpublishedEvent>((e) => _emitParticipants())
+      ..on<TrackPublishedEvent>((e) => _emitParticipants())
+      ..on<TrackSubscribedEvent>((e) => _emitParticipants())
+      ..on<TrackUnsubscribedEvent>((e) => _emitParticipants())
       ..on<RoomDisconnectedEvent>((e) async {
         if (_isIntentionalDisconnect) {
           _statusController.add(ZeytinCallStatus.disconnected);
@@ -296,12 +299,14 @@ class ZeytinCall {
           ),
         ),
       );
+      _emitParticipants();
     }
   }
 
   Future<void> toggleCamera(bool enabled) async {
     if (_room?.localParticipant != null) {
       await _room!.localParticipant!.setCameraEnabled(enabled);
+      _emitParticipants();
     }
   }
 

@@ -139,7 +139,9 @@ class ZeytinSocialModel {
     }
 
     return ZeytinSocialModel(
-      user: ZeytinUserModel.fromJson(data["user"]),
+      user: data["user"] != null
+          ? ZeytinUserModel.fromJson(data["user"])
+          : null,
       text: data["text"] ?? "",
       images: data["images"] ?? [],
       category: data["category"] ?? "",

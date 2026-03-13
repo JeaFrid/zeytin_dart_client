@@ -19,6 +19,7 @@ class ZeytinClient {
   String get email => _email;
   String get token => _token;
   String get truck => _truckID;
+  String get password => _password;
   late Dio _dioInstance;
   bool _isInitialized = false;
 
@@ -38,6 +39,28 @@ class ZeytinClient {
       _isInitialized = true;
     }
     return _dioInstance;
+  }
+
+  Future<ZeytinResponse> postRaw(String path, Map<String, dynamic> data) async {
+    try {
+      Response response = await _dio.post(path, data: data);
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      return ZeytinResponse.fromMap(responseData, password: _password);
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.response?.data?["message"] ?? e.message,
+      );
+    } catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.toString(),
+      );
+    }
   }
 
   Future<String?> _getHandshakeKey() async {

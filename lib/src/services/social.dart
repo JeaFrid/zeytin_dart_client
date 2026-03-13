@@ -10,7 +10,7 @@ class ZeytinSocial {
   Future<ZeytinResponse> createPost({
     required ZeytinSocialModel postModel,
   }) async {
-    String id = Uuid().v1();
+    String id = postModel.id ?? Uuid().v1();
 
     return await zeytin.addData(
       box: "social",
