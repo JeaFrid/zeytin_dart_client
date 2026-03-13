@@ -18,6 +18,7 @@ export 'src/services/store.dart';
 export 'src/models/call.dart';
 export 'src/models/notification.dart';
 export 'src/services/call.dart';
+export 'src/services/mail.dart';
 export 'src/services/notification.dart';
 export 'src/services/product.dart';
 export 'src/models/forum.dart';

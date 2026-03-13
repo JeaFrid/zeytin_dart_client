@@ -18,3 +18,7 @@
 - Zeytin is now more secure.
 
 - Email Service Active! You can now send emails to your users by adding a few lines to the [config.dart](https://github.com/JeaFrid/Zeytin/blob/main/lib/config.dart) file on the server ([check GitHub](https://github.com/JeaFrid/Zeytin)!). I’ve explained how to do this in section 14 of the `README.md`.
+
+## 2.3.1
+
+- Minor bug patches.
