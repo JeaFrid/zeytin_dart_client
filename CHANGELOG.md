@@ -22,3 +22,7 @@
 ## 2.3.1
 
 - Minor bug patches.
+
+## 2.4.0
+
+- The encryptor has been updated. Don't worry, everything is the same. It's just technical matters.

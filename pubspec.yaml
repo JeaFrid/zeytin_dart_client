@@ -1,25 +1,26 @@
 name: zeytin
 description: A server solution that is independent of external dependencies, has its own database engine, is end-to-end encrypted, and is autonomous.
-version: 2.3.1
+version: 2.4.0
 homepage: https://github.com/JeaFrid/zeytin_dart_client
 environment:
   sdk: ^3.10.4
-  flutter: ">=1.17.0"
+  flutter: ">=3.38.0"
+
 dependencies:
-  crypto: ^3.0.7
-  dio: ^5.9.1
-  encrypt: ^5.0.3
   flutter:
     sdk: flutter
-  flutter_webrtc: ^1.2.0
-  livekit_client: ^2.5.3
-  path_provider: ^2.1.5
-  uuid: ^4.5.2
+
+  crypto: ^3.0.7
+  dio: ^5.11.1
+  flutter_webrtc: 1.6.2+hotfix.3
+  livekit_client: 2.13.0
+  path_provider: ^2.1.6
+  uuid: ^4.6.0
   web_socket_channel: ^3.0.3
-  zeytinx: ^2.1.0
+  pointycastle: ^4.0.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
   flutter_lints: ^6.0.0
-flutter:

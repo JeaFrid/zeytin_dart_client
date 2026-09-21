@@ -2,6 +2,8 @@ include: package:flutter_lints/flutter.yaml
 analyzer:
   errors:
     avoid_print: ignore
+  exclude:
+    - build/**
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options
